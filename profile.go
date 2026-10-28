@@ -3,10 +3,8 @@ package rc
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -45,13 +43,7 @@ The go, python and typescript profilers are also found under their own published
 					return err
 				}
 			}
-			cmd := exec.CommandContext(c.Context(), path, args[1:]...)
-			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, c.OutOrStdout(), c.ErrOrStderr()
-			var exit *exec.ExitError
-			if err = cmd.Run(); errors.As(err, &exit) {
-				return &ExitError{exit.ExitCode()}
-			}
-			return err
+			return runPlugin(c, path, args[1:])
 		},
 	}
 }
@@ -60,35 +52,42 @@ func profilerPath(language string) (string, error) {
 	if !languageName.MatchString(language) {
 		return "", fmt.Errorf("invalid language %q", language)
 	}
-	env := "RC_" + strings.ToUpper(strings.ReplaceAll(language, "-", "_")) + "_PROFILER_BIN"
 	names := []string{"rc-profiler-" + language}
 	if published, ok := publishedProfilers[language]; ok {
 		names = append(names, published)
 	}
-	if override := os.Getenv(env); override != "" {
-		names = []string{override}
+	path, err := findExecutable(profilerEnv(language), names...)
+	if err != nil {
+		return "", fmt.Errorf("no %s profiler found: install rc-profiler-%s on PATH or set %s", language, language, profilerEnv(language))
 	}
-	for _, name := range names {
-		if path, err := exec.LookPath(name); err == nil {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("no %s profiler found: install rc-profiler-%s on PATH or set %s", language, language, env)
+	return path, nil
+}
+
+func profilerEnv(language string) string {
+	return "RC_" + strings.ToUpper(strings.ReplaceAll(language, "-", "_")) + "_PROFILER_BIN"
 }
 
 func runsProfiler(args []string) bool {
 	return len(args) > 0 && !strings.HasPrefix(args[0], "-") && args[0] != "version"
 }
 
-func checkCoreSchema(ctx context.Context, path, language string, stderr io.Writer) error {
+type profilerInfo struct {
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	CoreSchemas []string `json:"coreSchemas"`
+}
+
+// queryInfo asks a profiler for --version --json; ok is false when it cannot answer that way.
+func queryInfo(ctx context.Context, path string) (info profilerInfo, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var info struct {
-		Version     string   `json:"version"`
-		CoreSchemas []string `json:"coreSchemas"`
-	}
 	out, err := exec.CommandContext(ctx, path, "--version", "--json").Output()
-	if err != nil || json.Unmarshal(out, &info) != nil || len(info.CoreSchemas) == 0 {
+	return info, err == nil && json.Unmarshal(out, &info) == nil && len(info.CoreSchemas) > 0
+}
+
+func checkCoreSchema(ctx context.Context, path, language string, stderr io.Writer) error {
+	info, ok := queryInfo(ctx, path)
+	if !ok {
 		fmt.Fprintf(stderr, "note: the %s profiler does not report its core schemas; skipping the compatibility check\n", language)
 		return nil
 	}
