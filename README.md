@@ -34,6 +34,13 @@ macOS, Linux and Windows, `checksums.txt`, build provenance attestations
 formulas, `rc.rb` and `rc-profiler-go.rb` (built from the latest Go profiler release). Titles follow [Conventional Commits](https://www.conventionalcommits.org/):
 `feat` releases a minor version, `fix`, `perf` and `revert` a patch, and `!` a major.
 
+### Homebrew tap (maintainers)
+
+Create `runtimeconditions/homebrew-tools` and add a repository secret `HOMEBREW_TAP_TOKEN` here: a
+fine-grained token with contents write access to that repository only. Each release then commits
+`Formula/rc.rb` and `Formula/rc-profiler-go.rb` to it. Without the secret the step is skipped, and the
+formulas stay attached to the release for copying by hand.
+
 ## Build
 
 ```sh
