@@ -1,0 +1,84 @@
+name: Build and release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+
+  release:
+    if: github.event_name == 'push' && github.repository == 'runtimeconditions/go-rc-cli'
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    concurrency:
+      group: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Build the release archives
+        id: build
+        run: |
+          version=$(scripts/next-version.sh)
+          if [ -z "$version" ]; then
+            echo "Nothing to release since the last tag"
+            exit 0
+          fi
+          mkdir dist
+          for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/amd64; do
+            os=${target%/*} arch=${target#*/}
+            name=rc_${version}_${os}_${arch}
+            bin=rc
+            [ "$os" = windows ] && bin=rc.exe
+            mkdir "dist/$name"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$version" -o "dist/$name/$bin" ./cmd/rc
+            if [ "$os" = windows ]; then
+              (cd dist/$name && zip -q "../$name.zip" "$bin")
+            else
+              tar -C "dist/$name" -czf "dist/$name.tar.gz" "$bin"
+            fi
+            rm -r "dist/$name"
+          done
+          (cd dist && sha256sum rc_* > checksums.txt)
+          scripts/formula.sh "$version" dist/checksums.txt > dist/rc.rb
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: steps.build.outputs.version != ''
+        with:
+          subject-path: dist/rc_*
+      - name: Tag and publish the release
+        if: steps.build.outputs.version != ''
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" --generate-notes --verify-tag dist/*
