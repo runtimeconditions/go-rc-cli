@@ -21,6 +21,17 @@ rc profile typescript generate --project . --name orders --workload-uri https://
 A profiler for a new language needs no change here: put an executable named
 `rc-profiler-<language>` on `PATH`.
 
+`rc` checks that the profiler supports the core schema it targets before running it. The
+requirements on a profiler are in [CONTRACT.md](CONTRACT.md).
+
+## Install
+
+Every merge to `main` with a releasable change publishes a GitHub release with archives for
+macOS, Linux and Windows, `checksums.txt`, build provenance attestations
+(`gh attestation verify <archive> --repo runtimeconditions/go-rc-cli`), and a generated Homebrew
+formula, `rc.rb`. Titles follow [Conventional Commits](https://www.conventionalcommits.org/):
+`feat` releases a minor version, `fix`, `perf` and `revert` a patch, and `!` a major.
+
 ## Build
 
 ```sh
