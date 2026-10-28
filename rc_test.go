@@ -1,8 +1,8 @@
+//go:build !windows
+
 package rc
 
 import (
-	"bytes"
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -26,12 +26,6 @@ exit ${FAKE_EXIT:-0}
 		t.Fatal(err)
 	}
 	return dir
-}
-
-func rc(args ...string) (string, string, error) {
-	var out, errout bytes.Buffer
-	err := Run(context.Background(), "1.2.3", args, &out, &errout)
-	return out.String(), errout.String(), err
 }
 
 func TestRootListsProfileAndReportsItsVersion(t *testing.T) {
@@ -114,5 +108,54 @@ func TestProfileDoesNotCheckVersionQueries(t *testing.T) {
 	t.Setenv("FAKE_SCHEMAS", `["0.2.0"]`)
 	if out, _, err := rc("profile", "ruby", "--version"); err != nil || out != "args: --version\n" {
 		t.Fatalf("%v\n%q", err, out)
+	}
+}
+
+func TestBindingsPassesEveryArgumentToTheBindingsTool(t *testing.T) {
+	t.Setenv("PATH", fakeProfiler(t, "rc-bindings"))
+	out, _, err := rc("bindings", "check", "--target", "common-integrations:go", "--help")
+	if err != nil || out != "args: check --target common-integrations:go --help\n" {
+		t.Fatalf("%v\n%q", err, out)
+	}
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("RC_BINDINGS_BIN", filepath.Join(fakeProfiler(t, "tool"), "tool"))
+	if out, _, err = rc("bindings", "update"); err != nil || out != "args: update\n" {
+		t.Fatalf("%v\n%q", err, out)
+	}
+}
+
+func TestBindingsExplainsAMissingTool(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if _, _, err := rc("bindings", "check"); err == nil || !strings.Contains(err.Error(), "RC_BINDINGS_BIN") {
+		t.Fatalf("missing tool not explained: %v", err)
+	}
+}
+
+func TestDoctorListsToolsAndFlagsIncompatibleProfilers(t *testing.T) {
+	dir := fakeProfiler(t, "rc-profiler-typescript")
+	for _, name := range []string{"rc-profiler-ruby", "rc-bindings"} {
+		if err := os.Symlink(filepath.Join(dir, "rc-profiler-typescript"), filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("FAKE_SCHEMAS", `["`+CoreSchema+`"]`)
+	out, _, err := rc("doctor")
+	for _, want := range []string{"rc-bindings", "go  ", "not found", "typescript", "1.0.0  compatible", "ruby"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("doctor output lacks %q:\n%s", want, out)
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_SCHEMAS", `["0.2.0"]`)
+	out, _, err = rc("doctor")
+	if err == nil || !strings.Contains(out, "incompatible: supports 0.2.0") {
+		t.Fatalf("incompatible profiler not flagged: %v\n%s", err, out)
+	}
+	t.Setenv("FAKE_SCHEMAS", "")
+	if out, _, err = rc("doctor"); err != nil || !strings.Contains(out, "unchecked: core schemas not reported") || !strings.Contains(out, "args: --version") {
+		t.Fatalf("legacy profiler not described: %v\n%s", err, out)
 	}
 }

@@ -19,6 +19,6 @@ func Run(ctx context.Context, version string, args []string, stdout, stderr io.W
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetArgs(args)
-	root.AddCommand(profileCommand())
+	root.AddCommand(bindingsCommand(), profileCommand(), doctorCommand())
 	return root.ExecuteContext(ctx)
 }

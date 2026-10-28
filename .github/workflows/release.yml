@@ -11,8 +11,9 @@ permissions:
 jobs:
   verify:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -69,6 +70,9 @@ jobs:
           done
           (cd dist && sha256sum rc_* > checksums.txt)
           scripts/formula.sh "$version" dist/checksums.txt > dist/rc.rb
+          profiler=$(gh release view --repo runtimeconditions/go-rc-profiler --json tagName --jq .tagName)
+          gh release download "$profiler" --repo runtimeconditions/go-rc-profiler --pattern checksums.txt --dir "$RUNNER_TEMP/go-profiler"
+          scripts/go-profiler-formula.sh "${profiler#v}" "$RUNNER_TEMP/go-profiler/checksums.txt" > dist/rc-profiler-go.rb
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: steps.build.outputs.version != ''
